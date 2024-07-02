@@ -6,6 +6,22 @@ import os
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
+from azure.storage.blob import BlobServiceClient, BlobClient, ContentSettings
+import requests
+import os
+import time
+from tqdm import tqdm
+from datetime import datetime, timedelta
+import io
+import zipfile
+from azure.storage.blob import BlobServiceClient, ContentSettings  # Import ContentSettings
+from tqdm import tqdm
+import os
+from io import BytesIO
+import pandas as pd
+from collections import defaultdict
+import pickle
+
 
 from general import *
 from general_temp_for_company import *
@@ -15,6 +31,10 @@ from general_temp_for_harm_and_comp import *
 st.set_option('deprecation.showPyplotGlobalUse', False)
 
 
+# Azure Blob Storage configuration
+connection_string = 'DefaultEndpointsProtocol=https;AccountName=asatrustandsafetycv;AccountKey=PRjiFgPwqYyUvO+hQwi5Olh/gxjPs+EqWH2t5YrwJH/fSThCYpxfyYgyFLDlXuWGt4nkYJaeZqJw+AStxQ0Bog==;EndpointSuffix=core.windows.net'
+container_name = 'dsa'
+
 # Define global variables to hold loaded data
 data_ACC = None
 List_of_companies = []
@@ -23,21 +43,29 @@ List_of_content_type = []
 List_of_moderation_action = []
 List_of_automation_status = []
 
+# Initialize the BlobServiceClient
+blob_service_client = BlobServiceClient.from_connection_string(connection_string)
 
-# Dictionary of datasets with their names as keys and corresponding pickle files as values
-pickle_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the container client
+container_client = blob_service_client.get_container_client(container_name)
 
-# List all .pkl files in the directory
-pickle_files = [f for f in os.listdir(pickle_dir) if f.endswith('.pkl')]
+# List all blobs in the container
+blobs_list = container_client.list_blobs()
 
-# Create a dictionary with file names as options
-datasets = {f"Dataset {i+1} ({filename})": filename for i, filename in enumerate(pickle_files)}
+# Create a list with blob names
+datasets = [blob.name for blob in blobs_list]
 
 # Function to load data from selected dataset
 def load_data_from_dataset(selected_dataset):
-    pickle_file_path = datasets[selected_dataset]
-    with open(pickle_file_path, 'rb') as f:
-        data = pickle.load(f) 
+    blob_name = selected_dataset
+    blob_client = container_client.get_blob_client(blob_name)
+    
+    # Download the blob content to bytes
+    download_stream = blob_client.download_blob()
+    blob_data = download_stream.readall()
+
+    # Convert bytes to a file-like object
+    data = pickle.load(io.BytesIO(blob_data))
 
     # Extract necessary lists
     List_of_companies = list(data.keys())
@@ -51,7 +79,6 @@ def load_data_from_dataset(selected_dataset):
     List_of_automation_status = list(automation_dic.keys())
 
     return data, List_of_companies, List_of_harms, List_of_content_type, List_of_moderation_action, List_of_automation_status
-
 
 ################################################################################################################
 
@@ -67,10 +94,14 @@ def main():
 
 
     # Dropdown for selecting dataset
-    selected_dataset = st.selectbox("Select a dataset", list(datasets.keys()))
+    # Dropdown for selecting dataset
+    selected_dataset = st.selectbox("Select a dataset", datasets)
 
     # Load data and extract lists from selected dataset
-    data, List_of_companies, List_of_harms, List_of_content_type, List_of_moderation_action, List_of_automation_status = load_data_from_dataset(selected_dataset)
+    if selected_dataset:
+        data, List_of_companies, List_of_harms, List_of_content_type, List_of_moderation_action, List_of_automation_status = load_data_from_dataset(selected_dataset)
+    else:
+        st.write("No dataset selected.")
 
     # Create columns for the dropdowns
     company_col, harm_col, general_data_col = st.columns(3)
